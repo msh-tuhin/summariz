@@ -1,0 +1,31 @@
+# YouTube Content Summarizer Configuration
+
+# Default LLM provider (openai or anthropic)
+default_provider: openai
+
+# Default models for each provider
+models:
+  openai: gpt-4o-mini
+  anthropic: claude-sonnet-4-20250514
+
+# Transcription settings
+transcription:
+  # Gladia API endpoint
+  api_url: https://api.gladia.io/v2/transcription
+
+# YouTube download settings
+youtube:
+  # Preferred subtitle languages (in order of preference)
+  subtitle_languages:
+    - en
+    - en-US
+    - en-GB
+  # Audio format for transcription fallback
+  audio_format: mp3
+  # Audio quality (best, worst, or specific bitrate)
+  audio_quality: 192
+
+# Output settings
+output:
+  # Default output format
+  format: markdown
