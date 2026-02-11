@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
+import markdown
+from xhtml2pdf import pisa
 
 # Load environment variables from .env file
 load_dotenv()
@@ -121,3 +123,90 @@ def format_duration(seconds: int) -> str:
         parts.append(f"{secs}s")
 
     return " ".join(parts)
+
+
+def save_summary_to_pdf(summary: str, video_id: str, video_title: str, output_dir: Path | None = None) -> Path:
+    """Save a markdown summary to a PDF file.
+
+    Args:
+        summary: The markdown summary text to save.
+        video_id: The YouTube video ID.
+        video_title: The title of the video.
+        output_dir: Directory to save the PDF. Defaults to current directory.
+
+    Returns:
+        Path to the saved PDF file.
+    """
+    output_dir = output_dir or Path.cwd()
+    output_path = output_dir / f"youtube_{video_id}.pdf"
+
+    # Convert markdown to HTML
+    html_content = markdown.markdown(summary, extensions=['extra', 'codehilite'])
+
+    # Wrap in HTML template with styling
+    html_template = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+                line-height: 1.6;
+                margin: 40px;
+            }}
+            h1 {{
+                color: #333;
+                font-size: 20px;
+                border-bottom: 2px solid #333;
+                padding-bottom: 10px;
+            }}
+            h2 {{
+                color: #444;
+                font-size: 16px;
+                margin-top: 20px;
+            }}
+            h3 {{
+                color: #555;
+                font-size: 14px;
+            }}
+            .video-id {{
+                color: #888;
+                font-style: italic;
+                font-size: 10px;
+                margin-bottom: 20px;
+            }}
+            ul, ol {{
+                margin-left: 20px;
+            }}
+            code {{
+                background-color: #f4f4f4;
+                padding: 2px 6px;
+                font-family: monospace;
+            }}
+            pre {{
+                background-color: #f4f4f4;
+                padding: 10px;
+                overflow-x: auto;
+            }}
+            blockquote {{
+                border-left: 3px solid #ccc;
+                margin-left: 0;
+                padding-left: 15px;
+                color: #666;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>{video_title}</h1>
+        <div class="video-id">Video ID: {video_id}</div>
+        {html_content}
+    </body>
+    </html>
+    """
+
+    with open(output_path, "wb") as pdf_file:
+        pisa.CreatePDF(html_template, dest=pdf_file)
+
+    return output_path

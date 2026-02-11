@@ -10,7 +10,7 @@ from src.cache import PipelineCache, get_video_cache_id
 from src.youtube import get_video_info, download_subtitles, download_audio, extract_text_from_subtitles
 from src.transcriber import transcribe_audio
 from src.summarizer import summarize
-from src.utils import setup_logging, format_duration
+from src.utils import setup_logging, format_duration, save_summary_to_pdf
 
 # Default models per provider
 DEFAULT_MODELS = {
@@ -44,7 +44,7 @@ DEFAULT_MODELS = {
     "-o",
     type=click.Path(),
     default=None,
-    help="Output file path. If not specified, prints to stdout.",
+    help="Output directory for PDF. Defaults to current directory.",
 )
 @click.option(
     "--verbose",
@@ -82,7 +82,7 @@ def main(url: str, llm: str, model: str | None, transcriber: str, output: str | 
 
         python main.py "URL" --transcriber gladia --llm openai
 
-        python main.py "URL" --output summary.md --verbose
+        python main.py "URL" --output ./summaries --verbose
 
         python main.py "URL" --clear-cache  # Re-run from scratch
     """
@@ -179,15 +179,15 @@ def main(url: str, llm: str, model: str | None, transcriber: str, output: str | 
                 cache.save_summary(summary, llm, model)
 
         # Step 4: Output
-        if output:
-            output_path = Path(output)
-            output_path.write_text(summary, encoding="utf-8")
-            click.echo(f"\nSummary saved to: {output_path}")
-        else:
-            click.echo("\n" + "=" * 60)
-            click.echo("SUMMARY")
-            click.echo("=" * 60 + "\n")
-            click.echo(summary)
+        click.echo("\n" + "=" * 60)
+        click.echo("SUMMARY")
+        click.echo("=" * 60 + "\n")
+        click.echo(summary)
+
+        # Save to PDF
+        output_dir = Path(output) if output else None
+        pdf_path = save_summary_to_pdf(summary, video_info.id, video_info.title, output_dir)
+        click.echo(f"\nSummary saved to: {pdf_path}")
 
         click.echo("\nDone!")
 
