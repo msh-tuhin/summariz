@@ -1,0 +1,56 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  APP_DIR: /opt/summarizer
+  SERVICE_NAME: summarizer
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Ubuntu server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: APP_DIR,SERVICE_NAME
+          script: |
+            set -e  # Exit on any error
+
+            cd $APP_DIR
+
+            # Reset repo to match remote (discard local changes)
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd
+
+            # Activate virtual environment
+            source venv/bin/activate
+
+            # Install Python dependencies
+            pip install -r requirements.txt --quiet
+
+            # Reinstall PyTorch with CUDA support (WhisperX replaces with CPU version)
+            # pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --quiet
+
+            # Restart the systemd service
+            sudo /bin/systemctl restart $SERVICE_NAME
+
+            # Wait for service to start
+            sleep 5
+
+            # Health check
+            curl --fail --silent http://localhost:8000/api/v1/health || {
+              echo "Health check failed!"
+              sudo /bin/systemctl status $SERVICE_NAME --no-pager
+              exit 1
+            }
+
+            echo "Deployment successful!"

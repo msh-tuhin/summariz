@@ -1,0 +1,26 @@
+[Unit]
+Description=YouTube Content Summarizer API
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/summarizer
+Environment="PATH=/opt/summarizer/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/opt/summarizer/.env
+ExecStart=/opt/summarizer/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=summarizer
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
