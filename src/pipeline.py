@@ -20,7 +20,7 @@ from .utils import save_summary_to_pdf
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-4-20250514",
-    "ollama": "llama3.1",
+    "ollama": "deepseek-v3.2",  # Cloud model, falls back to llama3.1 locally
 }
 
 

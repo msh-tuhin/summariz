@@ -174,24 +174,79 @@ class AnthropicSummarizer(BaseSummarizer):
 
 
 class OllamaSummarizer(BaseSummarizer):
-    """Summarizer using local Ollama models."""
+    """Summarizer using Ollama with cloud fallback to local."""
 
-    default_model = "llama3.1"
+    default_cloud_model = "deepseek-v3.2"
+    default_local_model = "llama3.1"
+    default_model = default_cloud_model  # For compatibility
+
+    def __init__(self):
+        # Check for cloud API key
+        try:
+            self.api_key = get_api_key("OLLAMA_API_KEY")
+            self.cloud_available = True
+            logger.debug("Ollama cloud API key found")
+        except (ValueError, KeyError):
+            self.api_key = None
+            self.cloud_available = False
+            logger.debug("No Ollama cloud API key, using local only")
 
     def summarize(self, text: str, video_title: str, model: str | None = None) -> str:
-        model = model or self.default_model
-        logger.debug(f"Using Ollama model: {model}")
-
         # Combine system prompt and user prompt for Ollama
         full_prompt = f"""{SYSTEM_PROMPT}
 
 {self._build_user_prompt(text, video_title)}"""
 
-        response = ollama.chat(
-            model=model,
-            messages=[
-                {"role": "user", "content": full_prompt},
-            ],
+        messages = [{"role": "user", "content": full_prompt}]
+
+        # Try cloud first if available
+        if self.cloud_available:
+            cloud_model = model or self.default_cloud_model
+            try:
+                return self._call_cloud(cloud_model, messages)
+            except Exception as e:
+                logger.warning(f"Ollama cloud failed: {e}. Falling back to local.")
+
+        # Fall back to local
+        local_model = model or self.default_local_model
+        return self._call_local(local_model, messages)
+
+    def _call_cloud(self, model: str, messages: list) -> str:
+        """Call Ollama cloud API."""
+        logger.debug(f"Using Ollama cloud model: {model}")
+
+        client = ollama.Client(
+            host="https://api.ollama.com",
+            headers={"Authorization": f"Bearer {self.api_key}"},
         )
 
-        return response["message"]["content"]
+        response = client.chat(model=model, messages=messages)
+        return self._extract_response(response)
+
+    def _call_local(self, model: str, messages: list) -> str:
+        """Call local Ollama instance."""
+        logger.debug(f"Using Ollama local model: {model}")
+
+        response = ollama.chat(model=model, messages=messages)
+        return self._extract_response(response)
+
+    def _extract_response(self, response) -> str:
+        """Extract text from Ollama response, handling reasoning models."""
+        message = response.get("message", {})
+
+        # For dict-style response
+        if isinstance(message, dict):
+            content = message.get("content", "")
+            thinking = message.get("thinking", "")
+        else:
+            # For object-style response (newer ollama library)
+            content = getattr(message, "content", "") or ""
+            thinking = getattr(message, "thinking", "") or ""
+
+        # Prefer content, fall back to thinking for reasoning models
+        result = content.strip() if content.strip() else thinking.strip()
+
+        if not result:
+            logger.warning(f"Empty response from Ollama: {response}")
+
+        return result
