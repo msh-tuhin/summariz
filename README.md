@@ -12,7 +12,7 @@ A CLI tool that summarizes YouTube videos using AI. It extracts content from man
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.12
 - FFmpeg (for audio processing)
 - CUDA-compatible GPU (recommended for WhisperX)
 
@@ -22,7 +22,7 @@ A CLI tool that summarizes YouTube videos using AI. It extracts content from man
 ```bash
 git clone <repository-url>
 cd content_summary
-python -m venv venv
+py -3.12 -m venv venv312
 venv\Scripts\activate  # Windows
 # or
 source venv/bin/activate  # Linux/macOS
@@ -38,7 +38,7 @@ pip install -r requirements.txt
 WhisperX installation replaces PyTorch with the CPU-only version. You must reinstall the CUDA version for GPU acceleration:
 
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 --force-reinstall
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --force-reinstall
 ```
 
 Replace `cu121` with your CUDA version if different (e.g., `cu118` for CUDA 11.8).
