@@ -3,3 +3,4 @@ venv/
 .claude
 .env
 *.pdf
+venv312

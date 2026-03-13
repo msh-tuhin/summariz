@@ -9,3 +9,8 @@ pyyaml>=6.0
 click>=8.1.0
 markdown>=3.5.0
 xhtml2pdf>=0.2.11
+
+# Web service
+fastapi==0.135.1
+uvicorn==0.41.0
+pydantic==2.12.5

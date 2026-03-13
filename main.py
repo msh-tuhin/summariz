@@ -6,18 +6,8 @@ from pathlib import Path
 
 import click
 
-from src.cache import PipelineCache, get_video_cache_id
-from src.youtube import get_video_info, download_subtitles, download_audio, extract_text_from_subtitles
-from src.transcriber import transcribe_audio
-from src.summarizer import summarize
-from src.utils import setup_logging, format_duration, save_summary_to_pdf
-
-# Default models per provider
-DEFAULT_MODELS = {
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-sonnet-4-20250514",
-    "ollama": "llama3.1",
-}
+from src.pipeline import PipelineConfig, run_pipeline
+from src.utils import setup_logging, format_duration
 
 
 @click.command()
@@ -67,7 +57,17 @@ DEFAULT_MODELS = {
     is_flag=True,
     help="Clear cached data for this video before running.",
 )
-def main(url: str, llm: str, model: str | None, transcriber: str, output: str | None, verbose: bool, force_audio: bool, no_cache: bool, clear_cache: bool):
+def main(
+    url: str,
+    llm: str,
+    model: str | None,
+    transcriber: str,
+    output: str | None,
+    verbose: bool,
+    force_audio: bool,
+    no_cache: bool,
+    clear_cache: bool,
+):
     """Summarize a YouTube video.
 
     URL: The YouTube video URL to summarize.
@@ -88,113 +88,37 @@ def main(url: str, llm: str, model: str | None, transcriber: str, output: str | 
     """
     logger = setup_logging(verbose)
 
-    # Resolve model name
-    model = model or DEFAULT_MODELS.get(llm, "")
+    def print_progress(msg: str):
+        click.echo(msg)
 
     try:
-        # Initialize cache
-        video_id = get_video_cache_id(url)
-        cache = PipelineCache(video_id)
+        config = PipelineConfig(
+            url=url,
+            llm=llm,
+            model=model,
+            transcriber=transcriber,
+            output_dir=Path(output) if output else None,
+            force_audio=force_audio,
+            use_cache=not no_cache,
+            clear_cache=clear_cache,
+        )
 
-        if clear_cache:
-            cache.clear()
-            click.echo("Cache cleared.")
+        result = run_pipeline(config, progress_callback=print_progress)
 
-        use_cache = not no_cache
+        # Print video info
+        click.echo(f"\nTitle: {result.video_info.title}")
+        click.echo(f"Channel: {result.video_info.channel}")
+        click.echo(f"Duration: {format_duration(result.video_info.duration)}")
 
-        # Step 1: Get video info
-        video_info = None
-        if use_cache:
-            video_info = cache.load_video_info()
-
-        if video_info:
-            click.echo(f"[cached] Video info loaded from cache")
-        else:
-            click.echo(f"Fetching video information...")
-            video_info = get_video_info(url)
-            if use_cache:
-                cache.save_video_info(video_info)
-
-        click.echo(f"Title: {video_info.title}")
-        click.echo(f"Channel: {video_info.channel}")
-        click.echo(f"Duration: {format_duration(video_info.duration)}")
-        click.echo()
-
-        # Step 2: Get content (subtitles or audio transcription)
-        text_content = None
-
-        if use_cache:
-            text_content = cache.load_content()
-            if text_content:
-                click.echo(f"[cached] Content loaded from cache ({len(text_content):,} characters)")
-
-        if text_content is None:
-            if not force_audio and video_info.has_manual_subtitles:
-                click.echo("Manual subtitles available. Downloading...")
-                subtitle_path = download_subtitles(url, video_info)
-
-                if subtitle_path:
-                    text_content = extract_text_from_subtitles(subtitle_path)
-                    click.echo(f"Extracted {len(text_content):,} characters from subtitles.")
-                    if use_cache:
-                        cache.save_content(text_content)
-
-            if text_content is None:
-                if force_audio:
-                    click.echo("Force audio mode. Downloading audio...")
-                else:
-                    click.echo("No manual subtitles. Downloading audio for transcription...")
-
-                # Check for cached audio
-                audio_path = cache.get_audio_path() if use_cache else None
-
-                if audio_path:
-                    click.echo(f"[cached] Using cached audio file")
-                else:
-                    audio_path = download_audio(url, video_info)
-                    click.echo(f"Audio downloaded.")
-                    if use_cache:
-                        audio_path = cache.save_audio(audio_path)
-
-                click.echo(f"Starting transcription with {transcriber}...")
-                text_content = transcribe_audio(audio_path, backend=transcriber)
-                click.echo(f"Transcription complete: {len(text_content):,} characters.")
-                if use_cache:
-                    cache.save_content(text_content)
-
-        click.echo()
-
-        # Step 3: Generate summary
-        summary = None
-
-        if use_cache:
-            summary = cache.load_summary(llm, model)
-            if summary:
-                click.echo(f"[cached] Summary loaded from cache ({llm}/{model})")
-
-        if summary is None:
-            click.echo(f"Generating summary using {llm}/{model}...")
-            summary = summarize(text_content, video_info.title, provider=llm, model=model)
-            if use_cache:
-                cache.save_summary(summary, llm, model)
-
-        # Step 4: Output
+        # Output summary
         click.echo("\n" + "=" * 60)
         click.echo("SUMMARY")
         click.echo("=" * 60 + "\n")
-        click.echo(summary)
-
-        # Save to PDF
-        output_dir = Path(output) if output else None
-        pdf_path = save_summary_to_pdf(summary, video_info.id, video_info.title, output_dir)
-        click.echo(f"\nSummary saved to: {pdf_path}")
-
+        click.echo(result.summary)
+        click.echo(f"\nSummary saved to: {result.pdf_path}")
         click.echo("\nDone!")
 
-    except ValueError as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-    except RuntimeError as e:
+    except (ValueError, RuntimeError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
     except Exception as e:
