@@ -1,15 +1,91 @@
 """YouTube subtitle and audio download functionality."""
 
+import json
 import logging
+import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 import yt_dlp
+from dotenv import load_dotenv
 
 from .utils import get_temp_dir, sanitize_filename
 
+# Load environment variables
+load_dotenv()
+
 logger = logging.getLogger("content_summary")
+
+
+def _get_yt_dlp_base_opts() -> dict:
+    """Get base yt-dlp options with cookie and runtime support.
+
+    Configurable via environment variables:
+        YT_COOKIES_FILE: Path to cookies.txt file
+        YT_NO_CHECK_CERTS: Set to "1" to skip SSL verification
+
+    Note: JS runtime is handled separately via subprocess when needed.
+    """
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+
+    # Cookie support
+    cookies_file = os.environ.get("YT_COOKIES_FILE")
+    if cookies_file and Path(cookies_file).exists():
+        opts["cookiefile"] = cookies_file
+        logger.debug(f"Using cookies file: {cookies_file}")
+    elif cookies_file:
+        logger.warning(f"Cookies file not found: {cookies_file}")
+
+    # SSL verification
+    if os.environ.get("YT_NO_CHECK_CERTS") == "1":
+        opts["nocheckcertificate"] = True
+        logger.debug("SSL certificate verification disabled")
+
+    return opts
+
+
+def _build_yt_dlp_command(url: str, extra_args: list[str] = None) -> list[str]:
+    """Build yt-dlp command with environment-based options.
+
+    Args:
+        url: The YouTube URL.
+        extra_args: Additional command line arguments.
+
+    Returns:
+        List of command arguments.
+    """
+    cmd = ["yt-dlp"]
+
+    # Cookie support
+    cookies_file = os.environ.get("YT_COOKIES_FILE")
+    if cookies_file and Path(cookies_file).exists():
+        cmd.extend(["--cookies", cookies_file])
+
+    # JS runtime
+    js_runtime = os.environ.get("YT_JS_RUNTIME")
+    if js_runtime:
+        cmd.extend(["--js-runtimes", f"node:{js_runtime}"])
+        cmd.extend(["--remote-components", "ejs:github"])
+
+    # SSL verification
+    if os.environ.get("YT_NO_CHECK_CERTS") == "1":
+        cmd.append("--no-check-certificates")
+
+    if extra_args:
+        cmd.extend(extra_args)
+
+    cmd.append(url)
+    return cmd
+
+
+def _needs_js_runtime() -> bool:
+    """Check if JS runtime is configured."""
+    return bool(os.environ.get("YT_JS_RUNTIME"))
 
 
 @dataclass
@@ -66,17 +142,19 @@ def get_video_info(url: str) -> VideoInfo:
     """
     logger.info(f"Fetching video info for: {url}")
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": False,
-    }
+    if _needs_js_runtime():
+        # Use subprocess for JS runtime support
+        info = _get_video_info_subprocess(url)
+    else:
+        # Use Python API
+        ydl_opts = _get_yt_dlp_base_opts()
+        ydl_opts["extract_flat"] = False
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except yt_dlp.utils.DownloadError as e:
-            raise ValueError(f"Failed to fetch video info: {e}") from e
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+            except yt_dlp.utils.DownloadError as e:
+                raise ValueError(f"Failed to fetch video info: {e}") from e
 
     video_info = VideoInfo(
         id=info.get("id", ""),
@@ -93,6 +171,35 @@ def get_video_info(url: str) -> VideoInfo:
     logger.info(f"Manual subtitles available: {list(video_info.manual_subtitles.keys())}")
 
     return video_info
+
+
+def _get_video_info_subprocess(url: str) -> dict:
+    """Fetch video info using subprocess (supports JS runtime).
+
+    Args:
+        url: The YouTube URL.
+
+    Returns:
+        Video info dict.
+
+    Raises:
+        ValueError: If fetching fails.
+    """
+    cmd = _build_yt_dlp_command(url, ["--dump-json", "--no-download"])
+    logger.debug(f"Running: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)
+    except subprocess.CalledProcessError as e:
+        raise ValueError(f"Failed to fetch video info: {e.stderr}") from e
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse video info: {e}") from e
 
 
 def download_subtitles(url: str, video_info: VideoInfo | None = None, lang: str | None = None) -> Path | None:
@@ -124,18 +231,28 @@ def download_subtitles(url: str, video_info: VideoInfo | None = None, lang: str 
     temp_dir = get_temp_dir()
     output_template = str(temp_dir / f"{sanitize_filename(video_info.title)}")
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "writesubtitles": True,
-        "subtitleslangs": [target_lang],
-        "subtitlesformat": "vtt/srt/best",
-        "outtmpl": output_template,
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    if _needs_js_runtime():
+        # Use subprocess for JS runtime support
+        cmd = _build_yt_dlp_command(url, [
+            "--skip-download",
+            "--write-subs",
+            "--sub-langs", target_lang,
+            "--sub-format", "vtt/srt/best",
+            "-o", output_template,
+        ])
+        logger.debug(f"Running: {' '.join(cmd)}")
+        subprocess.run(cmd, check=False)
+    else:
+        ydl_opts = _get_yt_dlp_base_opts()
+        ydl_opts.update({
+            "skip_download": True,
+            "writesubtitles": True,
+            "subtitleslangs": [target_lang],
+            "subtitlesformat": "vtt/srt/best",
+            "outtmpl": output_template,
+        })
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
     # Find the downloaded subtitle file
     for ext in [".vtt", ".srt"]:
@@ -169,20 +286,32 @@ def download_audio(url: str, video_info: VideoInfo | None = None) -> Path:
     temp_dir = get_temp_dir()
     output_template = str(temp_dir / sanitize_filename(video_info.title))
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "format": "bestaudio/best",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }],
-        "outtmpl": output_template,
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    if _needs_js_runtime():
+        # Use subprocess for JS runtime support
+        cmd = _build_yt_dlp_command(url, [
+            "-f", "bestaudio/best",
+            "-x",
+            "--audio-format", "mp3",
+            "--audio-quality", "192K",
+            "-o", output_template,
+        ])
+        logger.debug(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Audio download failed: {result.stderr}")
+    else:
+        ydl_opts = _get_yt_dlp_base_opts()
+        ydl_opts.update({
+            "format": "bestaudio/best",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+            "outtmpl": output_template,
+        })
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
     audio_path = Path(f"{output_template}.mp3")
     if audio_path.exists():
