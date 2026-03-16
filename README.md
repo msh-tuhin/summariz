@@ -1,6 +1,8 @@
 # YouTube Content Summarizer
 
-A CLI tool that summarizes YouTube videos using AI. It extracts content from manual subtitles or audio transcription, then generates a structured summary using your choice of LLM provider.
+A tool that summarizes YouTube videos using AI. It extracts content from manual subtitles or audio transcription, then generates a structured summary using your choice of LLM provider.
+
+Available as both a **CLI tool** and a **REST API** with background job processing.
 
 ## Features
 
@@ -106,6 +108,68 @@ Force audio transcription (skip subtitles):
 ```bash
 python main.py "https://youtube.com/watch?v=..." --force-audio
 ```
+
+## Web API
+
+The project includes a FastAPI-based REST API for integration with web applications.
+
+### Running the Server
+
+```bash
+# Development
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
+
+# Production
+uvicorn app:app --host 127.0.0.1 --port 8000
+```
+
+The API will be available at `http://localhost:8000`. Interactive docs at `/docs`.
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/summarize` | Submit a new summarization job |
+| GET | `/api/v1/jobs/{job_id}` | Get job status and progress |
+| GET | `/api/v1/jobs/{job_id}/pdf` | Download the generated PDF |
+| GET | `/api/v1/jobs/{job_id}/summary` | Get the summary text |
+| GET | `/api/v1/health` | Health check |
+
+### Example Usage
+
+**Submit a job:**
+```bash
+curl -X POST http://localhost:8000/api/v1/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://youtube.com/watch?v=VIDEO_ID", "llm": "ollama"}'
+```
+
+Response:
+```json
+{
+  "job_id": "abc123",
+  "status": "pending",
+  "video_id": "VIDEO_ID",
+  "status_url": "/api/v1/jobs/abc123",
+  "message": "Job submitted successfully"
+}
+```
+
+**Check job status:**
+```bash
+curl http://localhost:8000/api/v1/jobs/abc123
+```
+
+**Request body options for `/api/v1/summarize`:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | string | required | YouTube video URL |
+| `llm` | string | `"ollama"` | LLM provider: `openai`, `anthropic`, `ollama` |
+| `model` | string | null | Specific model name |
+| `transcriber` | string | `"whisperx"` | Transcription backend: `whisperx`, `gladia` |
+| `force_audio` | boolean | `false` | Skip subtitles, use audio |
+| `no_cache` | boolean | `false` | Disable caching |
 
 ## Output
 
