@@ -6,8 +6,8 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 env:
-  APP_DIR: /home/sajja/summarizer
-  SERVICE_NAME: summarizer
+  APP_DIR: /home/sajja/summariz
+  SERVICE_NAME: summariz
 
 jobs:
   deploy:
