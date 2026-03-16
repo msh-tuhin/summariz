@@ -6,7 +6,7 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 env:
-  APP_DIR: /opt/summarizer
+  APP_DIR: /home/sajja/summarizer
   SERVICE_NAME: summarizer
 
 jobs:
